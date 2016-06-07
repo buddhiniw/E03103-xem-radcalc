@@ -1,0 +1,335 @@
+	subroutine sigmodel_calc(e1,e2,th,a,z,m_tgt,aux,sig_dis,sig_qe,sig,modelhack)
+C       +______________________________________________________________________________
+c	
+c       Subroutine to compute model unradiated cross section from a combination
+c       of Y-scaling and deep inelastic models. The DEEPSIG model can be smeared
+c       with a gaussian in missing mass squared of width RESOL$ (one sigma).
+c       If SMEAR$ is .TRUE., such smearing will occur. If SMEAR$ is .FALSE.,
+c       smearing is suppresed. It should be noted that the smearing involves
+c       computing a convolution integral, which significantly slows down
+c       this subroutine!
+c       
+c       ARGUMENTS:
+c       
+c       E1:		-	Incident energy in GeV.
+c       E2:		- Scattered energy in GeV.
+c       TH:		- Scattering angle in Degrees.
+c       A:		- 'A' of nucleus.
+c       Z:		- Number of protons in nucleus.
+c       M_TGT:	- Mass of target nucleus in GeV/c^2.
+c       M_REC:	- Mass of recoiling nucleon in GeV/c^2.
+c       E_SEP:	- Separation energy for target nucleus in GeV/c^2.
+c       SIG  :	- Calculated cross section in nb/(MeV-ster).
+C       ______________________________________________________________________________
+
+        implicit none
+	include 'math_physics.inc'
+	include 'include.inc'
+
+C       Declare arguments.
+
+	real*8		e1,e2,th,a,z,m_tgt,aux(7),sig
+	logical		modelhack
+
+C       Declare locals.
+
+	real*8	 	sig_qe,sig_dis,y,normfac
+        real*8		thr,cs,sn,elastic_peak
+	real*8          Q2,nu,W2, x, pmax,nn
+        real*8          ld2_a,ld2_z,ld2_nn,ld2_aux(7),ld2_sig_dis
+        real*8          emc_corr,ld2_inta
+        real*8          x1,x2,sig_dis_emc,sig_donal,sig_dis_donal
+        real*8          frac,corfac
+	integer         inta, intz
+	save
+
+        real*8 emc_func_xem
+	external emc_func_xem
+
+	real*8 emc_func_slac
+	external emc_func_slac
+
+C       If at or beyond elastic peak, return ZERO!
+
+	thr = th*d_r
+	cs = cos(thr/2.)
+	sn = sin(thr/2.)
+	elastic_peak = e1/(1.+2.*e1*sn**2/m_tgt)
+c       dg	if (e2.ge.elastic_peak) then
+c       dg	   sig = 0.D00
+c       dg	   return
+c       dg	endif
+c	write(6,*) 'got to 1'
+
+	Q2 = 4.*e1*e2*sn**2
+	nu=e1-e2
+	w2 = -Q2 + m_p**2 + 2.0*m_p*nu 
+        x = Q2/2/m_p/nu
+
+	innt = 30.0
+	innp = 30.0
+	nn=a-z
+	inta=a
+	intz=z
+
+	pmax=1.0
+
+	call f_to_sig(e1,e2,th,a,z,m_tgt,aux,sig_qe,y)
+
+c----------------------------------------------------------------
+c       
+c       do inelastic stuff only for ld2, for nuc targets sig_dis=ld2*emc
+c       for now set all the values  to ld2 
+c       aux is the ld2 qe param  from target_info.f file
+
+
+cccccccccccccccc
+ccc     dont forget to change this  stuff when ld2 qe param changes
+cccccccccccccccc
+	
+	ld2_a=2
+	ld2_z=1
+	ld2_nn=1
+	ld2_aux(3)= 0.0091109
+	ld2_aux(4)= 0.00151273
+	ld2_aux(5)= 0.00937085
+	ld2_aux(6)= 0.0108193
+	ld2_aux(7)= 46.4
+	ld2_inta=ld2_a
+
+
+c--------------------------------------------------------------------
+	x1=0.8			!x<x1 --> use emc corrected ld2
+	x2=0.9			!x1<=x<x2 --> smooth transition from emc corrected ld2 to donals smearing
+				!x>=x2  --> donal's smearing
+	if(a.eq.2) then
+	   call bdisnew4he3(e1,e2,th,ld2_a, ld2_z,ld2_nn, epsn(ld2_inta), 
+	1	pmax, innp, innt,  ld2_aux(3),ld2_aux(4), ld2_aux(5), 
+	2	ld2_aux(6),ld2_aux(7),ld2_sig_dis)
+
+	   sig_dis=ld2_sig_dis
+
+	elseif(a.gt.2) then
+	   if (x.lt.x2) then	!we need emc corrected fit upto x<0.9 (in transition region also)
+          call bdisnew4he3(e1,e2,th,ld2_a, ld2_z,ld2_nn, epsn(ld2_inta), 
+	1	   pmax, innp, innt,  ld2_aux(3),ld2_aux(4), ld2_aux(5), 
+	2	   ld2_aux(6),ld2_aux(7),ld2_sig_dis)
+
+	      emc_corr= emc_func_xem(x,a)
+c       emc_corr= emc_func_slac(x,a)
+	      sig_dis_emc=ld2_sig_dis*emc_corr*(a/2.) !inelastic emc ratios are made with pernuc xsec
+	   endif
+
+
+	   if (x.ge.x1) then	! now start donal's smearing prescription  (in transition region also)
+	      call bdisnew4he3(e1,e2,th,a, z,nn, epsn(inta), 
+	1	   pmax, innp, innt,  aux(3),aux(4), aux(5), 
+	2	   aux(6),aux(7),sig_donal)
+	      sig_dis_donal=sig_donal
+	   endif
+
+
+	   if (x.lt.x1) then
+	      sig_dis=sig_dis_emc
+	   elseif ((x.ge.x1).and.(x.lt.x2)) then 
+	      frac = (x-x1)/(x2-x1)
+	      sig_dis= sig_dis_donal*frac + sig_dis_emc*(1.-frac) 
+	   elseif(x.ge.x2) then
+	      sig_dis=sig_dis_donal
+	   endif
+
+	else
+	   write(*,*) '** in sigmodel_calc, anuc lt 2'
+	   stop			! we dont do hydrogen with this code
+ 	endif
+
+
+c    do a high x tweak for the inelastic part of nuc targets
+                  if ((x.gt.0.9).and.(a.gt.2)) then
+                 
+                    call  highx_cor(a,x,corfac)
+	            sig_dis = sig_dis*corfac
+                    
+                 endif
+
+
+	sig_dis=sig_dis/1000.
+
+	sig = sig_qe + sig_dis
+
+	return
+	end
+
+
+
+
+
+c-------------------------------------------------------------------------------------------
+	real*8 function emc_func_slac(x,A)
+	real*8 x,A,atemp
+	real*8 alpha,C
+
+	atemp = A
+				!	if(A.eq.4.or.A.eq.3) then  ! emc effect is more like C for these 2...
+				!	   atemp = 12
+				!	endif
+
+	alpha = -0.070+2.189*x - 24.667*x**2 + 145.291*x**3
+	1    -497.237*x**4 + 1013.129*x**5 - 1208.393*x**6
+	2    +775.767*x**7 - 205.872*x**8
+
+	C = exp( 0.017 + 0.018*log(x) + 0.005*log(x)**2)
+	
+	emc_func_slac = C*atemp**alpha
+	return 
+	end
+
+
+
+
+c-------------------------------------------------------------------------------------------------
+
+	real*8 function emc_func_xem(x,A) ! now compute the emc effect from our own fits.
+        real*8 x,a
+	real*8 emc
+
+	if(A.eq.3) then
+
+           if (x.lt.1.0) then
+	      
+	      emc = 3.60574
+	1	   -17.9930*x
+	2	   +38.5132*x**2
+	3	   -7.30356*x**3
+	4	   -71.4791*x**4
+	5	   +83.6995*x**5
+	6	   -27.5481*x**6
+	 
+	   endif
+
+	else if(A.eq.4) then
+	   if (x.lt.1.0) then
+
+	      emc = 4.0905
+	1	   -20.5864*x
+	2	   +41.1811*x**2
+	3	   -4.62533*x**3
+	4	   -74.9766*x**4
+	5	   +79.3210*x**5
+	6	   -22.8134*x**6
+
+	  
+	   endif
+
+
+	else if(A.eq.9) then
+	   if (x.lt.1.0) then
+	      
+	      emc = 4.39669
+	1	   -21.8919*x
+	2	   +41.8461*x**2
+	3	   -2.69928*x**3
+	4	   -75.3117*x**4
+	5	   +75.1341*x**5
+	6	   -19.8517*x**6
+
+ 
+	   endif
+
+
+	else if(A.eq.12) then
+	   if (x.lt.1.0) then
+	      
+	      emc = 4.18521
+	1	   -20.8696*x
+	2	   +40.8226*x**2
+	3	   -3.07714*x**3
+	4	   -74.6169*x**4
+	5	   +74.8572*x**5
+	6	   -19.5719*x**6
+	 	  
+	   endif
+
+
+
+	else if(A.eq.63) then 
+	   if (x.lt.1.0) then
+	      
+	      emc = 4.01755
+	1	   -19.8687*x
+	2	   +39.0684*x**2
+	3	   -4.74309*x**3
+	4	   -71.9124*x**4
+	5	   +78.8172*x**5
+	6	   -23.8254*x**6
+
+	   
+	   endif
+
+
+	else if(A.eq.197) then
+
+	   if (x.lt.1.0) then
+	      
+	      emc = 4.20323
+	1	   -21.0955*x
+	2	   +40.3644*x**2
+	3	   -2.65750*x**3
+	4	   -73.9456*x**4
+	5	   +75.4186*x**5
+	6	   -20.7732*x**6
+
+
+	 
+	   endif
+	else if(A.eq.27) then
+	  emc=1.0
+	else  
+        write(*,*) '** in sigmodel_calc, emc fit not valid'
+	   stop		
+	endif
+	emc_func_xem= emc
+	return
+	end
+c-----------------------------------------------------------------------------------------------
+c for now  only do he4,be,c,cu
+
+	subroutine highx_cor(anuc,x,cor)
+
+	real*8 x,cor,anuc
+        
+        if(anuc.eq.4) then
+	   if ((x.gt.0.9).and.(x.lt.1.17)) then
+	      cor= 3.24553 - (3.47244*x) +  (1.11309*x**2)
+	   elseif (x.ge.1.17) then
+	      cor=0.7
+	   endif
+	elseif(anuc.eq.9) then
+
+	   if ((x.gt.0.9).and.(x.lt.1.26)) then
+	      cor= 0.779378 + (1.84808*x) - (1.7588*x**2)
+	   elseif (x.ge.1.26) then
+	      cor=0.3
+	   endif
+
+	elseif(anuc.eq.12) then
+	   if ((x.gt.0.9).and.(x.lt.1.26)) then
+	      cor=  1.09301 + (0.798708*x) - (0.939027*x**2)
+	   elseif (x.ge.1.26) then
+	      cor=0.55
+	   endif
+
+        elseif(anuc.eq.63) then
+	   if ((x.gt.0.9).and.(x.lt.1.3)) then
+	      cor=  3.3275 - (3.94771*x) + (1.496*x**2)
+	   elseif (x.ge.1.3) then
+	      cor=0.68
+	   endif
+
+	else
+	   cor=1.
+	endif
+
+	return
+	end
+c-----------------------------------------------------------------------------------------------

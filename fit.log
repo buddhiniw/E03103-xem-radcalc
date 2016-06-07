@@ -1,0 +1,38 @@
+
+
+*******************************************************************************
+Wed Mar 21 16:24:09 2007
+
+
+FIT:    data read from 'resolution_out.dat' using 3:($5>1.05 && $5<1.1 ? ($2):1/0)
+        #datapoints = 2
+        residuals are weighted equally (unit weight)
+
+function used for fitting: straight(x)
+fitted parameters initialized with current variable values
+
+
+
+Iteration 0
+WSSR        : 40.2711           delta(WSSR)/WSSR   : 0
+delta(WSSR) : 0                 limit for stopping : 1e-05
+lambda	  : 3.25132
+
+initial set of free parameter values
+
+b               = 0.01
+m               = -1
+
+After 8 iterations the fit converged.
+final sum of squares of residuals : 2.52929e-32
+abs. change during last iteration : -2.22465e-24
+
+
+Exactly as many data points as there are parameters.
+In this degenerate case, all errors are zero by definition.
+
+Final set of parameters 
+======================= 
+
+b               = 0.635541       
+m               = -0.139544      

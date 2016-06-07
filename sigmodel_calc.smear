@@ -1,0 +1,224 @@
+	subroutine sigmodel_calc(e1,e2,th,a,z,m_tgt,aux,sig_dis,sig_qe,sig,modelhack)
+C+______________________________________________________________________________
+!
+! Subroutine to compute model unradiated cross section from a combination
+!   of Y-scaling and deep inelastic models. The DEEPSIG model can be smeared
+!   with a gaussian in missing mass squared of width RESOL$ (one sigma).
+!   If SMEAR$ is .TRUE., such smearing will occur. If SMEAR$ is .FALSE.,
+!   smearing is suppresed. It should be noted that the smearing involves
+!   computing a convolution integral, which significantly slows down
+!   this subroutine!
+!
+! ARGUMENTS:
+!
+!   E1:		-	Incident energy in GeV.
+!   E2:		- Scattered energy in GeV.
+!   TH:		- Scattering angle in Degrees.
+!   A:		- 'A' of nucleus.
+!   Z:		- Number of protons in nucleus.
+!   M_TGT:	- Mass of target nucleus in GeV/c^2.
+!   M_REC:	- Mass of recoiling nucleon in GeV/c^2.
+!   E_SEP:	- Separation energy for target nucleus in GeV/c^2.
+!   SIG  :	- Calculated cross section in nb/(MeV-ster).
+C-______________________________________________________________________________
+
+        implicit none
+	include 'math_physics.inc'
+	include 'include.inc'
+
+C Declare arguments.
+
+	real*8		e1,e2,th,a,z,m_tgt,aux(7),sig
+	logical		modelhack
+
+C Declare locals.
+
+	real*8	 	sig_qe,sig_dis,y,normfac
+        real*8		thr,cs,sn,elastic_peak
+	real*8          Q2,nu,W2, x, pmax,nn
+	integer         inta, intz
+	save
+
+C If at or beyond elastic peak, return ZERO!
+
+	thr = th*d_r
+	cs = cos(thr/2.)
+	sn = sin(thr/2.)
+	elastic_peak = e1/(1.+2.*e1*sn**2/m_tgt)
+cdg	if (e2.ge.elastic_peak) then
+cdg	   sig = 0.D00
+cdg	   return
+cdg	endif
+c	write(6,*) 'got to 1'
+
+	Q2 = 4.*e1*e2*sn**2
+!	write(*,*) 'in sigmodel calc ', e1, e2, q2
+	nu=e1-e2
+	w2 = -Q2 + m_p**2 + 2.0*m_p*nu 
+
+	innt = 30.0
+	innp = 30.0
+	nn=a-z
+	inta=a
+	intz=z
+!	pmax = 2.5*fermip(inta)
+	pmax=1.0
+!	write(*,*) 'fermi ', fermip(inta), pmax, fermip(2), epsn(2), epsn(inta)
+	call f_to_sig(e1,e2,th,a,z,m_tgt,aux,sig_qe,y)
+!	write(6,*) 'got to 2, sig_qe=',sig_qe,w2,y
+
+!	call bdisnew4he3(e1, e2, th,a, z, nn, eps(inta), pmax,innt, innp, aux(3),
+!     &   1, 1, 1, 1, 0) 
+	call bdisnew4he3(e1,e2,th,a, z,nn, epsn(inta), 
+     &  pmax, innp, innt,  aux(3),aux(4), aux(5), 
+     &  aux(6),aux(7),sig_dis)
+	
+!	if(a.gt.1) then
+!	   call dis_smear(e1,e2,th,sig_dis,a,z,.true.)
+!	else
+!	   call dis_smear(e1,e2,th,sig_dis,a,z,.false.)
+!	endif
+!	write(6,*) 'got to 3, sigdis=',sig_dis
+
+c	write(6,*) 'cheesy poofs',q2/2/m_p/nu,sig_dis,sig_qe
+	sig_dis=sig_dis/1000
+	sig = sig_qe + sig_dis
+!!	write(6,*) 'got to 4, sig=',sig
+
+
+C Add tweak to model at 15,23 degrees, but only if modelhack=.true.
+C for radcor, want this hack, but NOT for tbincorr.
+
+c	if (modelhack .and. y.le.1.e10) then
+c	  if (abs(th-15).le.0.01) then
+c            normfac=0.94509+0.32709*y +
+c     >          0.30442*exp(-(y-0.10770)**2/2/0.06180**2) +
+c     >          0.30261*exp(-(y+0.25926)**2/2/0.10962**2)
+c          else if (abs(th-23).le.0.01 .and. z.eq.26) then
+c	    normfac=exp ( 2.59026E-02 +0.25571*y -0.10551*y**2 
+c     >		-4.0166*y**3 -5.6110*y**4 )
+c	  else
+c	    normfac=1.0
+c	  endif
+
+	normfac=1.0
+
+	x = q2/2/m_p/nu
+
+C turn this off for now...
+C	call modelcor(x,a,th,normfac)
+
+	sig = sig * normfac
+
+	return
+	end
+
+******************************************************************************************************
+	subroutine  modelcor(x,a,th,normfac)
+
+	real*8 x,a,th,normfac, frac
+	real*8 xmin, xmax, xave, cor1, cor2
+
+	xmin = 0.8
+	xmax = 0.9
+
+	if(x.le.xmin) then
+	   call smallxcor(x,a,th,normfac)
+	else if(x.ge.xmax) then
+	   call largexcor(x,a,th,normfac)
+	else
+	   call smallxcor(x,a,th,cor1)
+	   call largexcor(x,a,th,cor2)
+	   frac = (x-xmin)/(xmax-xmin)
+	   normfac = cor1*(1.0-frac) + cor2*frac
+	endif
+
+	return
+	end
+
+	subroutine smallxcor(x,a,th,cor1)
+C       this is just a lame polynomial correction to the total cross section
+	real*8 x,a,th,cor1
+
+	if(a.eq.2) then
+	   if(th.lt.19.0) then
+	      cor1 = 0.392158+2.85029*x-4.20487*x**2+1.87469*x**3
+	   else if(th.lt.23.0) then
+	      cor1 = 3.90719-13.0144*x+19.277*x**2-9.46667*x**3
+	   else if(th.lt.27.0) then
+	      cor1 = 1.0
+	   else if(th.lt.33.0) then
+	      cor1 = 1.0
+	   else if(th.lt.41.0) then
+	      cor1 = 1.35391-2.11038*x+4.05921*x**2-2.4337*x**3
+	   else if(th.lt.51.0) then
+	      cor1 = 1.5038-2.91073*x+5.34857*x**2-3.13674*x**3
+	   else
+	      cor1 = 1.0
+	   endif
+	else if(a.eq.4) then
+	   if(th.lt.19.0) then
+	      cor1 = 0.392158+2.85029*x-4.20487*x**2+1.87469*x**3
+	   else if(th.lt.23.0) then
+	      cor1 = 3.90719-13.0144*x+19.277*x**2-9.46667*x**3
+	   else if(th.lt.27.0) then
+	      cor1 = 1.0
+	   else if(th.lt.33.0) then
+	      cor1 = 2.8393-8.54814*x+12.9257*x**2-6.33376*x**3
+	   else if(th.lt.41.0) then
+	      cor1 = 1.18406-1.251*x+2.54643*x**2-1.50271*x**3
+	   else if(th.lt.51.0) then
+	      cor1 = 1.127-1.1706*x+2.55178*x**2-1.59711*x**3
+	   else
+	      cor1 = 1.0
+	   endif
+	else
+	   cor = 1.0
+	endif
+	
+	return
+	end
+
+	subroutine largexcor(x,a,th,cor2)
+C       this is just a lame polynomial correction to the total cross section
+	real*8 x,a,th,cor2
+
+	if(a.eq.2) then
+	   if(th.lt.19.0) then
+	      cor2 = 20.003-79.6528*x+129.59*x**2-102.729*x**3+39.7259*x**4-5.99438*x**5
+	   else if(th.lt.23.0) then
+	      cor2 = 1.8573-2.17727*x+1.69642*x**2-0.454204*x**3 
+	   else if(th.lt.27.0) then
+	      cor2 = 3.6494-6.51448*x+5.18183*x**2-1.4014*x**3 
+	   else if(th.lt.33.0) then
+	      cor2 = 3.30720-5.11268*x+3.59547*x**2-0.926542*x**3 
+	   else if(th.lt.41.0) then
+	      cor2 = -2.55885+12.2681*x-13.2154*x**2+4.33818*x**3 
+	   else if(th.lt.51.0) then
+	      cor2 = -11.8053+41.3143*x-43.1343*x**2+14.3614*x**3 
+	   else
+	      cor2 = 1.0
+	   endif
+	else if(a.eq.4) then
+	   if(th.lt.19.0) then
+	      cor2 = 20.003-79.6528*x+129.59*x**2-102.729*x**3+39.7259*x**4-5.99438*x**5
+	   else if(th.lt.23.0) then
+	      cor2 = 1.8573-2.17727*x+1.69642*x**2-0.454204*x**3 
+	   else if(th.lt.27.0) then
+	      cor2 = 3.6494-6.51448*x+5.18183*x**2-1.4014*x**3 
+	   else if(th.lt.33.0) then
+	      cor2 = 2.64086-3.74385*x+2.76618*x**2-0.711432*x**3 
+	   else if(th.lt.41.0) then
+	      cor2 = -2.57033+11.5114*x-11.7811*x**2+3.79009*x**3 
+	   else if(th.lt.51.0) then
+	      cor2 = -11.7308+40.1887*x-41.3077*x**2+13.6942*x**3 
+	   else
+	      cor2 = 1.0
+	   endif
+	else
+	   cor = 1.0
+	endif
+	return
+	end
+
+

@@ -1,0 +1,535 @@
+	subroutine sigmodel_calc(e1,e2,th,a,z,m_tgt,aux,sig_dis,sig_qe,sig,modelhack)
+C       +______________________________________________________________________________
+c	
+c       Subroutine to compute model unradiated cross section from a combination
+c       of Y-scaling and deep inelastic models. The DEEPSIG model can be smeared
+c       with a gaussian in missing mass squared of width RESOL$ (one sigma).
+c       If SMEAR$ is .TRUE., such smearing will occur. If SMEAR$ is .FALSE.,
+c       smearing is suppresed. It should be noted that the smearing involves
+c       computing a convolution integral, which significantly slows down
+c       this subroutine!
+c       
+c       ARGUMENTS:
+c       
+c       E1:		-	Incident energy in GeV.
+c       E2:		- Scattered energy in GeV.
+c       TH:		- Scattering angle in Degrees.
+c       A:		- 'A' of nucleus.
+c       Z:		- Number of protons in nucleus.
+c       M_TGT:	- Mass of target nucleus in GeV/c^2.
+c       M_REC:	- Mass of recoiling nucleon in GeV/c^2.
+c       E_SEP:	- Separation energy for target nucleus in GeV/c^2.
+c       SIG  :	- Calculated cross section in nb/(MeV-ster).
+C       ______________________________________________________________________________
+
+        implicit none
+	include 'math_physics.inc'
+	include 'include.inc'
+
+C       Declare arguments.
+
+	real*8		e1,e2,th,a,z,m_tgt,aux(7),sig
+	logical		modelhack
+
+C       Declare locals.
+
+	real*8	 	sig_qe,sig_dis,y,normfac
+        real*8		thr,cs,sn,tn,elastic_peak
+	real*8          Q2,nu,WSQ, x, pmax,nn
+        real*8          ld2_a,ld2_z,ld2_nn,ld2_aux(7),ld2_sig_dis
+        real*8          emc_corr,ld2_inta
+        real*8          x1,x2,sig_dis_emc,sig_donal,sig_dis_donal
+	real*8          F1,F2,W1,W2,sigmott
+        real*8          frac,corfac, sig_before
+	integer         inta, intz
+	save
+
+        real*8 emc_func_xem
+	external emc_func_xem
+
+	real*8 emc_func_slac
+	external emc_func_slac
+
+C       If at or beyond elastic peak, return ZERO!
+
+	thr = th*d_r
+	cs = cos(thr/2.)
+	sn = sin(thr/2.)
+	tn = tan(thr/2.)
+	elastic_peak = e1/(1.+2.*e1*sn**2/m_tgt)
+c       dg	if (e2.ge.elastic_peak) then
+c       dg	   sig = 0.D00
+c       dg	   return
+c       dg	endif
+c	write(6,*) 'got to 1'
+
+	Q2 = 4.*e1*e2*sn**2
+	nu=e1-e2
+	WSQ = -Q2 + m_p**2 + 2.0*m_p*nu 
+        x = Q2/2/m_p/nu
+
+	innt = 30.0
+	innp = 30.0
+	nn=a-z
+	inta=a
+	intz=z
+
+	pmax=1.0
+
+	if(a.gt.1.5) then
+	   call f_to_sig(e1,e2,th,a,z,m_tgt,aux,sig_qe,y)
+	else
+	   sig_qe=0.0
+	endif
+
+c---------------------------------------------------------------------
+c    Following is the ld2 qe param  from target_info.f file
+c    don't forget to change this  stuff when ld2 qe param changes in that file
+cccccccccccccccc
+	
+	ld2_a=2
+	ld2_z=1
+	ld2_nn=1
+	ld2_aux(3)= 0.0091109
+	ld2_aux(4)= 0.00151273
+	ld2_aux(5)= 0.00937085
+	ld2_aux(6)= 0.0108193
+	ld2_aux(7)= 46.4
+	ld2_inta=ld2_a
+
+
+c--------------------------------------------------------------------
+	x1=0.8			!x<x1 --> use emc corrected ld2
+	x2=0.9			!x1<=x<x2 --> smooth transition from emc corrected ld2 to donals smearing
+				!x>=x2  --> donal's smearing
+	if(a.eq.2) then
+	   call bdisnew4he3(e1,e2,th,ld2_a, ld2_z,ld2_nn, epsn(ld2_inta), 
+	1	pmax, innp, innt,  ld2_aux(3),ld2_aux(4), ld2_aux(5), 
+	2	ld2_aux(6),ld2_aux(7),ld2_sig_dis)
+
+	   sig_dis=ld2_sig_dis
+
+	elseif(a.gt.2) then
+	   if (x.lt.x2) then	!we need emc corrected fit upto x<0.9 (in transition region also)
+	      call bdisnew4he3(e1,e2,th,ld2_a, ld2_z,ld2_nn, epsn(ld2_inta), 
+	1	   pmax, innp, innt,  ld2_aux(3),ld2_aux(4), ld2_aux(5), 
+	2	   ld2_aux(6),ld2_aux(7),ld2_sig_dis)
+
+	      emc_corr= emc_func_xem(x,a)
+c       emc_corr= emc_func_slac(x,a)
+	      sig_dis_emc=ld2_sig_dis*emc_corr*(a/2.) !inelastic emc ratios are made with pernuc xsec
+	   endif
+
+
+	   if (x.ge.x1) then	! now start donal's smearing prescription  (in transition region also)
+	      call bdisnew4he3(e1,e2,th,a, z,nn, epsn(inta), 
+	1	   pmax, innp, innt,  aux(3),aux(4), aux(5), 
+	2	   aux(6),aux(7),sig_donal)
+	      sig_dis_donal=sig_donal
+	   endif
+
+
+	   if (x.lt.x1) then
+	      sig_dis=sig_dis_emc
+	   elseif ((x.ge.x1).and.(x.lt.x2)) then 
+	      frac = (x-x1)/(x2-x1)
+	      sig_dis= sig_dis_donal*frac + sig_dis_emc*(1.-frac) 
+	   elseif(x.ge.x2) then
+	      sig_dis=sig_dis_donal
+	   endif
+
+	else
+	   call F1F2IN06(Z, A, Q2, WSQ, F1, F2)
+C Convert F1,F2 to W1,W2
+	   W1 = F1/m_p
+	   W2 = F2/nu
+C Mott cross section
+	   sigmott=(19732.0/(2.0*137.0388*e1*sn**2))**2*cs**2/1.d6
+	   sig_dis = 1d3*sigmott*(W2+2.0*W1*tn**2)
+ 	endif
+
+
+c    do a high x tweak for the inelastic part of nuc targets
+	if ((x.gt.0.9).and.(a.gt.2)) then	   
+	   call  dis_highx_cor(a,x,corfac)
+	   sig_before=sig_dis
+	   sig_dis = sig_dis*corfac
+!	   if (sig_dis.lt.0) then
+!	     write(*,*) 'wtf', sig_dis, x, corfac, sig_before
+!	   endif
+	endif
+
+	sig_dis=sig_dis/1.0d3
+	if (sig_dis.lt.0.) sig_dis=0.0
+	sig = sig_qe + sig_dis
+
+
+c
+c    do a global tweak to the model to have a better agreement with data 
+         if (a.gt.1.5) then
+    
+           if (a.eq.27) then ! no global cor for Al yet
+           corfac=1.
+           else
+	   call  global_cor(a,x,corfac)
+	   endif
+           sig = sig*corfac
+         endif
+	return
+	end
+
+
+
+
+
+c-------------------------------------------------------------------------------------------
+	real*8 function emc_func_slac(x,A)
+        implicit none
+	real*8 x,A,atemp
+	real*8 alpha,C
+
+	atemp = A
+				!	if(A.eq.4.or.A.eq.3) then  ! emc effect is more like C for these 2...
+				!	   atemp = 12
+				!	endif
+
+	alpha = -0.070+2.189*x - 24.667*x**2 + 145.291*x**3
+	1    -497.237*x**4 + 1013.129*x**5 - 1208.393*x**6
+	2    +775.767*x**7 - 205.872*x**8
+
+	C = exp( 0.017 + 0.018*log(x) + 0.005*log(x)**2)
+	
+	emc_func_slac = C*atemp**alpha
+	return 
+	end
+
+
+
+
+c-------------------------------------------------------------------------------------------------
+c polynomial fit made to inelastic emc ratios from xem data
+c at low x (x<0.3) the fit is constrained with world data (to get some sort of shadowing behaviour).
+  
+	real*8 function emc_func_xem(x,A) ! now compute the emc effect from our own fits.
+         implicit none
+        real*8 x,a
+	real*8 emc
+
+        real*8 emc_func_slac
+	external emc_func_slac
+
+              if (x.lt.1.0) then
+
+		 if(A.eq.3) then
+		    emc = 0.944319 - 0.0613487*x + 6.71377*x**2 - 28.6644*x**3
+	1		 + 30.2783*x**4 + 43.069*x**5 - 103.946*x**6 + 53.7531*x**7
+
+		 else if(A.eq.4) then
+		    emc=  0.98063 - 0.0997634*x + 5.49381*x**2 -  27.0123*x**3
+	1		 + 31.6626*x**4 + 40.5945*x**5 - 106.929*x**6 + 57.5746*x**7
+
+		 else if(A.eq.9) then
+		    emc=  0.75268 + 5.37384*x - 28.6967*x**2 + 54.2646*x**3
+	1		 - 22.5907*x**4 - 41.8116*x**5 + 39.4976*x**6 - 4.8584*x**7
+
+		 else if(A.eq.12) then
+	    
+		    emc = 0.799072 + 4.34402*x - 23.1029*x**2 + 47.9501*x**3 
+	1		 - 36.1557*x**4 - 7.645*x**5 + 16.0252*x**6  - 0.140878*x**7
+
+		 else if(A.eq.63) then 
+		    emc=  0.831483 + 4.15302*x - 24.6046*x**2 + 51.3464*x**3
+	1		 - 29.781*x**4 - 34.0098*x**5 + 45.79*x**6  - 12.0018*x**7
+
+		 else if(A.eq.197) then
+		    emc= 0.730298 + 5.72872*x - 29.6655*x**2 + 52.8916*x**3
+	1		 - 21.7675*x**4 - 33.978*x**5 + 30.5705*x**6  - 2.75587*x**7
+
+	
+
+                  else if(a.eq.27) then !aji: for the time being use slac fit 072607
+
+                 emc= emc_func_slac(x,a)
+
+	        else  
+	      write(*,*) '** in emc_func_xem, unknown target'
+	      stop		
+	     endif
+
+
+
+
+
+
+	      else  
+		 write(*,*) '** in emc_func_xem, emc fit out of range'
+		 stop		
+	      endif
+	      emc_func_xem= emc
+	      return
+	      end
+
+c-----------------------------------------------------------------------------------------------
+c 
+
+	subroutine highx_cor(anuc,x,cor)
+        implicit none
+	real*8 x,cor,anuc
+
+         if(anuc.eq.3) then
+	   if ((x.gt.0.9).and.(x.lt.1.4)) then
+	    cor= -0.908273 + (4.13702*x) -(2.11462*x**2)
+	   elseif (x.ge.1.4) then
+	      cor=0.74
+	   endif
+        
+        elseif(anuc.eq.4) then
+	   if ((x.gt.0.9).and.(x.lt.1.17)) then
+	      cor= 3.24553 - (3.47244*x) +  (1.11309*x**2)
+	   elseif (x.ge.1.17) then
+	      cor=0.7
+	   endif
+	elseif(anuc.eq.9) then
+
+	   if ((x.gt.0.9).and.(x.lt.1.26)) then
+	      cor= 0.779378 + (1.84808*x) - (1.7588*x**2)
+	   elseif (x.ge.1.26) then
+	      cor=0.3
+	   endif
+
+	elseif(anuc.eq.12) then
+	   if ((x.gt.0.9).and.(x.lt.1.26)) then
+	      cor=  1.09301 + (0.798708*x) - (0.939027*x**2)
+	   elseif (x.ge.1.26) then
+	      cor=0.55
+	   endif
+
+        elseif(anuc.eq.63) then
+	   if ((x.gt.0.9).and.(x.lt.1.3)) then
+	      cor=  3.3275 - (3.94771*x) + (1.496*x**2)
+	   elseif (x.ge.1.3) then
+	      cor=0.68
+	   endif
+
+          elseif(anuc.eq.197) then
+	   if ((x.gt.0.9).and.(x.lt.1.3)) then
+           cor= -0.389135+ (3.08065*x)- (1.66297*x**2)
+	   elseif (x.ge.1.3) then
+	      cor=0.8
+	   endif
+
+	else
+	   cor=1.
+	endif
+
+	return
+	end
+c-----------------------------------------------------------------------------------------------
+	subroutine global_cor(anuc,x,cor)
+        implicit none
+	real*8 x,cor,anuc,x1,x2,x3,x4,frac
+        real*8 cor_x_lt_x1, cor_x_gt_x4, cor_polynom 
+	
+	if(anuc.eq.2) then
+
+
+           x1=0.35		
+	   x2=0.41
+	   x3=1.0
+	   x4=1.2
+
+	   cor_x_lt_x1=1.05
+	   cor_x_gt_x4=1.0
+
+            cor_polynom=  2.92057 -11.4061*x +   24.3902*x**2
+     1    -21.7706*x**3+ 6.85879*x**4
+
+
+
+	elseif(anuc.eq.3) then
+          
+           x1=0.3		
+	   x2=0.4
+	   x3=1.1
+	   x4=1.23
+
+	   cor_x_lt_x1=1.03
+	   cor_x_gt_x4=1.0
+
+            cor_polynom=  2.42182 -9.04041*x +   20.6668*x**2
+     1    -19.804*x**3+ 6.76544*x**4
+        
+
+	elseif(anuc.eq.4) then
+
+           x1=0.35		
+	   x2=0.4
+	   x3=1.02
+	   x4=1.1
+
+
+	   cor_x_lt_x1=1.04
+	   cor_x_gt_x4=1.0
+
+            cor_polynom=  2.581 -9.61188*x +  20.9375*x**2
+     1    -19.1055*x**3+ 6.21006*x**4
+
+
+	elseif(anuc.eq.9) then
+  
+           x1=0.35		
+	   x2=0.45
+	   x3=0.95
+	   x4=1.05
+
+	   cor_x_lt_x1=1.05
+	   cor_x_gt_x4=1.0
+
+            cor_polynom= 2.88017 - 11.1957*x +  23.8698*x**2
+     1   -21.223*x**3 +  6.66641*x**4
+
+
+	elseif(anuc.eq.12) then
+
+
+           x1=0.35		
+	   x2=0.5
+	   x3=0.95
+	   x4=1.05
+
+	   cor_x_lt_x1=1.05
+	   cor_x_gt_x4=1.0
+
+            cor_polynom=3.03629 - 12.9325*x + 29.3307*x**2
+     1   -27.8576*x**3 +  9.406*x**4
+
+
+	elseif(anuc.eq.63) then
+
+
+           x1=0.35		
+	   x2=0.47
+	   x3=1.06
+	   x4=1.3
+
+	   cor_x_lt_x1=1.04
+	   cor_x_gt_x4=1.0
+
+            cor_polynom= 2.0478 -6.65799*x +  15.3719*x**2
+     1    - 14.8565*x**3+ 5.03196*x**4
+
+
+
+	elseif(anuc.eq.197) then
+
+           x1=0.2		
+	   x2=0.33
+	   x3=1.1
+	   x4=1.2
+
+	   cor_x_lt_x1=1.0
+	   cor_x_gt_x4=0.9
+
+            cor_polynom=1.18549 -1.72079*x +   5.29924*x**2
+     1    - 6.22294*x**3+ 2.36782*x**4
+
+
+	else
+	   write(*,*) '** in global_cor, unknown target'
+	   stop
+	   
+	endif
+
+
+	if (x.lt.x1) then
+	   cor=cor_x_lt_x1
+	elseif ((x.ge.x1).and.(x.lt.x2)) then 
+	   frac = (x-x1)/(x2-x1)
+	   cor= cor_polynom*frac + cor_x_lt_x1 *(1.-frac) 
+	elseif((x.ge.x2).and.(x.lt.x3)) then
+	   cor= cor_polynom
+	elseif ((x.ge.x3).and.(x.lt.x4)) then 
+	   frac = (x-x3)/(x4-x3)
+	   cor= cor_x_gt_x4 *frac + cor_polynom *(1.-frac) 
+	elseif(x.ge.x4) then
+	   cor=cor_x_gt_x4
+	endif
+
+
+	return
+	end
+!---------------------------------------------------------------------------
+
+	subroutine dis_highx_cor(anuc,x,cor)
+        implicit none
+	real*8 x,cor,anuc, frac,xlow1,xhigh1,xlow2,xhigh2
+
+	xlow1=0.9
+	xhigh1=0.95
+
+	xlow2=1.3
+	xhigh2=1.4
+	
+	frac=1.
+	if(anuc.eq.3) then
+	   cor=-2.12112*x+3.03449
+	   if((x.ge.xlow1).and.(x.le.xhigh1)) then
+	     frac = (x-xlow1)/(xhigh1-xlow1)
+	   endif
+	   cor=frac*cor+1.-frac
+	   
+        
+	 elseif(anuc.eq.4) then
+	   cor=-1.76466*x+2.68897
+	   if((x.ge.xlow1).and.(x.le.xhigh1)) then
+	     frac = (x-xlow1)/(xhigh1-xlow1)
+	   endif
+	   cor=frac*cor+1.-frac
+	   
+	 elseif(anuc.eq.9) then
+	   cor=-1.8383*x+2.77253
+	   if((x.ge.xlow1).and.(x.le.xhigh1)) then
+	     frac = (x-xlow1)/(xhigh1-xlow1)
+	   endif
+	   cor=frac*cor+1.-frac
+	   
+	 elseif(anuc.eq.12) then
+	   cor=-1.32193*x+2.28754
+	   if((x.ge.xlow1).and.(x.le.xhigh1)) then
+	     frac = (x-xlow1)/(xhigh1-xlow1)
+	   endif
+!	   if((x.ge.xlow2).and.(x.le.xhigh2)) then
+!	     frac = (x-xlow2)/(xhigh2-xlow2)
+!	     frac=1.-frac
+!	   endif
+!	   if(x.gt.xhigh2) frac=0.
+	   cor=frac*cor+1.-frac
+!	   write(21,*) 'cor is ', cor, x
+	 elseif(anuc.eq.63) then
+!	   cor=-2.21331*x+3.02106
+	   cor=-1.46912*x+2.31581
+	   if((x.ge.xlow1).and.(x.le.xhigh1)) then
+	     frac = (x-xlow1)/(xhigh1-xlow1)
+	   endif
+	   cor=frac*cor+1.-frac
+!	   cor=1.0
+	 elseif(anuc.eq.197) then
+ 	   cor= -1.72192*x+2.65671
+	   if((x.ge.xlow1).and.(x.le.xhigh1)) then
+	     frac = (x-xlow1)/(xhigh1-xlow1)
+	   endif
+	   cor=frac*cor+1.-frac
+	   
+	 else
+	   cor=1.
+	 endif
+	 
+	 if(cor.lt.0.4) cor=0.4
+
+	return
+	end
+c--------------------------------------------------------------------------------
+
+
+
+

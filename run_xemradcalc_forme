@@ -1,0 +1,9 @@
+#Usage: run_xemradcalc ebeam theta_hms p_hms_min p_hms_max targ_a
+#Ex: run_xemradcalc 5.766 40.0 1.14 2.90 4
+/u/group/hallc_ana/xem/pass3/replay/radcor/working/xem_radcalc << endofinput >! /u/group/hallc_ana/xem/pass3/replay/radcor/working/EMCE3/$1_$2_$5_exact.out
+$1
+$2
+$3
+$4
+$5
+endofinput

@@ -1,0 +1,9 @@
+#!/bin/tcsh
+nice +10 run_xemradcalc 5.766 40.0 1.14 4
+nice +10 run_xemradcalc 5.766 40.0 1.33 4
+nice +10 run_xemradcalc 5.766 40.0 1.56 4
+nice +10 run_xemradcalc 5.766 40.0 1.82 4
+nice +10 run_xemradcalc 5.766 40.0 2.13 4
+nice +10 run_xemradcalc 5.766 40.0 2.48 4
+nice +10 run_xemradcalc 5.766 40.0 2.90 4
+

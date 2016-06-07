@@ -1,0 +1,27 @@
+   6.00000000000000  GeV = Incident energy
+   30.0000000000000  Degrees = scattering angle
+   2.00000000000000  = A (target)
+   1.00000000000000  = Z (target)
+   3.524073452266015E-003  = Radiator before in radiation lengths
+   1.066724152047939E-002  = Radiator after  in radiation lengths
+   0.140000000000000  = RESOL for DEEPSIG smearing (not used)
+   2.250000000000000E-003  = E_SEP in GeV
+   1.000000000000000E-002  = F(0)
+   1.010000000000000E-003  = BigB
+   7.510000000000000E-003  = a
+   9.629999999999999E-003  = b
+   45.0000000000000  = alpha
+   1.00000000000000  = Number of protons in target nucleus
+   1.00000000000000  = Average number of neutrons in target nucleus
+   5.000000000000000E-003  = Dee in GeV
+  
+ calling sigmodel_calc
+ back from sigmodel_calc
+ calling radiate_init_calc
+ back from radiate_init_calc
+ calling radiate_calc
+ back from radiate_calc
+  
+   e1     e2     q2     x    sigraw     sigcor  rad_corr
+  
+ 6.000  1.200  1.929  0.214 0.896E-02 0.121E-01    0.7429

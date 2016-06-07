@@ -1,0 +1,10 @@
+#!/bin/tcsh
+#Usage: run_xemradcalc ebeam theta_hms p_hms_min p_hms_max targ_a
+#Ex: run_xemradcalc 5.766 40.0 1.14 2.90 4
+./xem_radcalc << endofinput >! OUT/$1_$2_$5.out
+$1
+$2
+$3
+$4
+$5
+endofinput

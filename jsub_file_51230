@@ -1,0 +1,7 @@
+PROJECT: xem
+JOBNAME:tables
+MAIL : fomin@jlab.org
+COMMAND: /group/hallc_ana/xem/pass3/replay/radcor/working/do50degsome.sh
+OPTIONS:4
+OS: linux
+TRACK:  analysis

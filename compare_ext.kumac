@@ -1,0 +1,18 @@
+ macro compare_ext
+   ve/del *
+   ve/read eb,ep,th,q2,xb,dsigb,dsigr,drad 5.766_40.0_27_dummy_short.out ! ! -/**/
+   ve/read eb,ep,th,q2,xb,wsigb,wsigr,wrad 5.766_40.0_27_walls_short.out ! ! -/**/
+   
+   np = $vlen(eb,1)
+   
+   ve/create ratio([np]) r
+   
+   sigma ratio= drad/wrad
+   
+   ve/create ex([np]) r
+   ve/create ey([np]) r
+   
+   set pmci 2
+   hplot/error ep ratio ex ey [np] 20 ! w
+   
+   ve/fit ep ratio ! p5 s
